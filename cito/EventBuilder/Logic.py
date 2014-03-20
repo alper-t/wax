@@ -27,24 +27,6 @@ from cito.Trigger import PeakFinder
 from cito.core.math import compute_subranges
 
 
-def find_sum_in_data(data):
-    """Find sum waveform in channel data
-
-
-    :param data: Initial time to query.
-    :type data: dict.
-    :returns:  dict -- Sum waveform indices and samples.
-    :raises: ValueError
-    """
-    for key, value in data.items():
-        start, stop, pmt_num = key
-        if pmt_num == 'sum':
-            sum0, sum1 = value['indices'][0], value['indices'][-1]
-            logging.debug('Sum waveform range: [%d, %d]', sum0, sum1)
-            return value
-
-    raise ValueError("Sum waveform not found")
-
 
 class EventBuilder():
 
@@ -84,21 +66,16 @@ class EventBuilder():
         # Step 1: Grab sum waveform:  this sum waveform will be used to identify S2 signals
         ##
         # sum0, sum1, time ranges
-        sum_data = find_sum_in_data(data)
+        sum_data = data.sum(1)
 
         ##
         # Step 2: Identify peaks in sum waveform using a Trigger algorithm
         ##
-        peak_indices, smooth_waveform = PeakFinder.identify_nonoverlapping_trigger_windows(sum_data['indices'],
-                                                                                           sum_data['samples'])
-        if len(peak_indices) == 0:  # If no peaks found, return
+        peaks = PeakFinder.find_peaks(sum_data)
+
+        if peaks.size == 0:  # If no peaks found, return
             self.log.info("No peak found; returning")
             return []
-        peaks = sum_data['indices'][peak_indices]
-        for peak in peaks:  # Check peak in sum waveform
-            assert sum_data['indices'][0] <= peak <= sum_data['indices'][-1]
-        self.log.debug('Peak indices: %s', str(peaks))
-        self.log.debug('Peak local indices: %s', str(peak_indices))
         self.log.debug("Peaks found: %s" % str(peaks))
 
         ##
@@ -106,11 +83,8 @@ class EventBuilder():
         ##
         event_ranges = compute_subranges(peaks)
         self.log.debug('%d trigger events from %d peaks',
-                       len(event_ranges),
-                       len(peak_indices))
-
-        data[(0, 0, 'smooth')] = {'indices': sum_data['indices'],
-                                  'samples': smooth_waveform}
+                       event_ranges.size,
+                       peaks.size)
 
         ##
         # Step 4: For each trigger event, associate channel information
@@ -137,38 +111,8 @@ class EventBuilder():
             evt_num = self.get_event_number()
             self.log.debug('\tEvent %d: [%d, %d]', evt_num, e0, e1)
 
-            # If there data within our search range [e0, e1]?
-            for key, value in data.items():
-                pmt_num = key[2]
-
-                if e1 < value['indices'][0] or value['indices'][-1] < e0:
-                    continue
-                elif e0 <= value['indices'][0] and value['indices'][-1] <= e1:
-                    indices_to_save = value['indices']
-                    samples_to_save = value['samples']
-                else:
-                    mask = (e0 < value['indices']) & (value['indices'] < e1)
-
-                    if not mask.any():
-                        continue
-
-                    indices_to_save = value['indices'].compress(mask)
-                    samples_to_save = value['samples'].compress(mask)
-
-                # Existing data that needs to be added?
-                if pmt_num in to_save['data']:
-                    indices_already_saved = to_save['data'][pmt_num]['indices']
-                    samples_already_saved = to_save['data'][pmt_num]['samples']
-                    indices_to_save = np.concatenate((indices_to_save,
-                                                      indices_already_saved))
-                    samples_to_save = np.concatenate((samples_to_save,
-                                                      samples_already_saved))
-
-                to_save['data'][pmt_num] = {'indices': indices_to_save,
-                                            'samples': samples_to_save}
-
-            to_save['peaks'] = [peak for peak in peaks if e0 < peak < e1]
-
+            to_save['data'] = data[e0:e1,]
+            to_save['peaks'] = peaks.compress((e0 < peaks) & (peaks < e1))
             to_save['evt_num'] = evt_num
             to_save['range'] = [int(e0), int(e1)]
             events.append(to_save)

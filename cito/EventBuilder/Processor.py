@@ -131,10 +131,9 @@ class ProcessTask():
         :raises: AssertionError
         """
         data_docs = self.input.get_data_docs(t0, t1)
-        data, size = Waveform.get_data_and_sum_waveform(data_docs, self.input)
+        data, size = Waveform.get_data_and_sum_waveform(data_docs, self.input, t0, t1)
 
         # If no data analyzed, return
-        self.log.debug("Size of data analyzed: %d", size)
         if size == 0:
             self.log.debug('No data found in [%d, %d]' % (t0, t1))
             return 0

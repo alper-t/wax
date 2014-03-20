@@ -29,28 +29,16 @@ def compute_subranges(peaks, range_around_peak=(-18000, 18000)):
         else:
             ranges.append([time_start, time_stop])
 
-    return ranges
+    return np.array(ranges, dtype=np.int32)
 
 
-def merge_subranges(ranges, indices, distance):
-    """Ranges is a list of tuples, that are merged if less than distance between them
-    """
-    combined_ranges = []
-    for subrange in ranges:
-        if len(combined_ranges) == 0:
-            combined_ranges.append(subrange)
-        elif indices[combined_ranges[-1][1]] + distance > indices[subrange[0]]:
-            combined_ranges[-1][1] = subrange[1]
-        else:
-            combined_ranges.append(subrange)
-    return combined_ranges
 
 def group(L):
     last = L[0]
     ifirst = 0
     ilast = 0
     for i, n in enumerate(L[1:]):
-        if n - 100 == last: # Part of the group, bump the end
+        if n - 1 == last: # Part of the group, bump the end
             last = n
             ilast = i + 1
         else: # Not part of the group, yield current group and start a new
@@ -72,7 +60,7 @@ def find_subranges(values):
 
     See http://stackoverflow.com/questions/2154249/identify-groups-of-continuous-numbers-in-a-list
     """
-    if values.size == 0:
+    if len(values) == 0:
         return []
 
     return list(group(values))

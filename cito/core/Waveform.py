@@ -2,7 +2,8 @@
 """
 
 import logging
-
+from scipy.sparse import dok_matrix, bsr_matrix, csr_matrix
+from cito.core.math import sizeof_fmt
 import numpy as np
 
 # Samples are actually 14 bit unsigned, so 16 bit signed fine
@@ -24,7 +25,7 @@ def get_samples(data):
     return samples
 
 
-def get_data_and_sum_waveform(cursor, inputdb):
+def get_data_and_sum_waveform(cursor, inputdb, t0, t1):
     """Get inverted sum waveform from mongo
 
     Args:
@@ -34,16 +35,15 @@ def get_data_and_sum_waveform(cursor, inputdb):
 
 
     Returns:
-       dict: Results dictionary with key 'size' and 'occurences'
+       csr matrix - not dok so can slice
     """
     log = logging.getLogger(__name__)
 
     size = 0
 
-    interpreted_data = {}
+    shape = (t1 - t0, 256) # 256 pmts
 
-    # This gets formatted later into something usable
-    sum_data = {}  # index -> sample
+    all_waveforms = csr_matrix(shape, dtype=np.int16)
 
     for doc in cursor:
         data = inputdb.get_data_from_doc(doc)
@@ -53,7 +53,7 @@ def get_data_and_sum_waveform(cursor, inputdb):
 
         size += len(data)
 
-        time_correction = doc['time']
+        time_index = doc['time'] - t0
 
         try:
             samples = get_samples(data)
@@ -62,46 +62,16 @@ def get_data_and_sum_waveform(cursor, inputdb):
             logging.exception(e)
             continue
 
-        # Improve?
         # Compute baseline with first 3 - numpy function slow
         baseline = (samples[0] + samples[1] + samples[2])/3
         samples -= baseline
 
-        reduction_factor = 100
+        y = num_channel * np.ones(samples.size)
+        x = np.arange(time_index, time_index + samples.size)
+        z = csr_matrix( (samples,(x,y)), shape=shape, dtype=np.int16)
 
-        for i, sample in enumerate(samples):
-            sample_index = int((time_correction + i)/reduction_factor)
+        all_waveforms = all_waveforms + z
 
-            if sample_index in sum_data:
-                sum_data[sample_index] += sample
-            else:
-                sum_data[sample_index] = np.int32(sample)
+    log.debug("Size of data process in bytes: %s", sizeof_fmt(size))
 
-        if samples.size != 0:
-            key = (time_correction,
-                   time_correction + len(samples),
-                   num_channel)
-
-            interpreted_data[key] = {
-                'indices': np.arange(time_correction,
-                                     time_correction + samples.size,
-                                     dtype=np.int32),
-                'samples': samples}
-
-    log.debug("Size of data process in bytes: %d", size)
-    if size == 0:
-        return interpreted_data, size
-    new_indices = [x for x in sum_data.keys()]
-    new_indices.sort()
-    new_samples = [sum_data[x] for x in new_indices]
-    new_indices = np.array(new_indices, dtype=np.int32) * reduction_factor
-    new_samples = np.array(new_samples, dtype=np.int32)
-
-    if new_indices.size >= 2:
-        key = (new_indices[0],
-               new_indices[-1],
-               'sum')
-        interpreted_data[key] = {'indices': new_indices,
-                                 'samples': new_samples}
-
-    return interpreted_data, size
+    return all_waveforms, size
